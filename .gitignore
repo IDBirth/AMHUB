@@ -15,6 +15,7 @@ dist-ssr
 # Env and secrets
 .env
 .env.*
+Secret/
 Secret/secrets.json
 
 # Python cache
@@ -38,5 +39,4 @@ coverage/
 
 
 Secret/secrets.json
-
 
