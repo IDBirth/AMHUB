@@ -44,12 +44,16 @@ export interface DeviceTelemetry {
   longitude: number;
   height: number;
   speed: number;
+  h_speed_mps?: number;
+  v_speed_mps?: number;
   battery_percent: number;
   link_signal_quality: number; // 0-100
   flight_time: number; // seconds
   yaw: number;
   pitch: number;
   roll: number;
+  live_active?: boolean;
+  live_capable?: boolean;
 }
 
 export interface Device {
@@ -66,4 +70,33 @@ export interface TopologyResponse {
   code: number;
   message: string;
   data: Device[];
+}
+
+// --- Backend Output Shapes (dock + drone) ---
+
+export interface BackendDock {
+  sn: string;
+  callsign: string;
+  online: boolean;
+  lat: number;
+  lng: number;
+  height_m: number;
+}
+
+export interface BackendDrone {
+  sn: string;
+  callsign: string;
+  online: boolean;
+  lat: number;
+  lng: number;
+  height_m: number;
+  yaw_deg: number;
+  pitch_deg: number;
+  roll_deg: number;
+  h_speed_mps: number;
+  v_speed_mps: number;
+  live: {
+    capable: boolean;
+    active: boolean;
+  };
 }

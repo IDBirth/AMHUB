@@ -15,7 +15,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
       case ConnectionStatus.ERROR:
         return 'bg-red-500/20 text-red-400 border-red-500/50';
       default:
-        return 'bg-slate-700/50 text-slate-400 border-slate-600';
+        return 'bg-[rgba(12,20,12,0.7)] text-[color:var(--muted)] border-[color:var(--card-border)]';
     }
   };
 

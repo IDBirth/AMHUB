@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import mapboxgl from 'mapbox-gl';
 import { Device } from '../types';
 
 interface MapPickerProps {
@@ -8,13 +8,14 @@ interface MapPickerProps {
   onLocationSelect: (lat: number, lng: number) => void;
   isMaximized?: boolean;
   devices?: Device[];
+  selectedDeviceSn?: string | null;
+  onMapInteract?: () => void;
 }
 
-// Mapbox Configuration
 const MAPBOX_TOKEN = "pk.eyJ1IjoiYmlsYWxhbXQiLCJhIjoiY21qcHdmNjd1M2ljMTNncXh4OG10bjM1ZSJ9.DdrBIWn_ukTldrDk0_7oWg";
-const MAPBOX_STYLE = "mapbox/streets-v12"; 
+const MAPBOX_STYLE = "mapbox://styles/mapbox/streets-v12";
+const MAPBOX_STYLE_SAT = "mapbox://styles/mapbox/satellite-streets-v12";
 
-// Drone SVG Icon Definition - Quadcopter Style
 const getDroneSvg = (color: string) => `
 <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -28,41 +29,46 @@ const getDroneSvg = (color: string) => `
   </defs>
   
   <g filter="url(#glow-${color.replace('#', '')})">
-    <!-- Center Body -->
     <path d="M40 40 h20 v20 h-20 z" fill="${color}" />
-    
-    <!-- Arms -->
     <path d="M40 40 L25 25" stroke="${color}" stroke-width="4" stroke-linecap="round" />
     <path d="M60 40 L75 25" stroke="${color}" stroke-width="4" stroke-linecap="round" />
     <path d="M40 60 L25 75" stroke="${color}" stroke-width="4" stroke-linecap="round" />
     <path d="M60 60 L75 75" stroke="${color}" stroke-width="4" stroke-linecap="round" />
-    
-    <!-- Motors/Props -->
     <circle cx="25" cy="25" r="8" stroke="${color}" stroke-width="2" fill="none" />
     <circle cx="75" cy="25" r="8" stroke="${color}" stroke-width="2" fill="none" />
     <circle cx="25" cy="75" r="8" stroke="${color}" stroke-width="2" fill="none" />
     <circle cx="75" cy="75" r="8" stroke="${color}" stroke-width="2" fill="none" />
-    
-    <!-- Prop Blades -->
     <path d="M15 25 h20 M25 15 v20" stroke="${color}" stroke-width="1" opacity="0.6" />
     <path d="M65 25 h20 M75 15 v20" stroke="${color}" stroke-width="1" opacity="0.6" />
     <path d="M15 75 h20 M25 65 v20" stroke="${color}" stroke-width="1" opacity="0.6" />
     <path d="M65 75 h20 M75 65 v20" stroke="${color}" stroke-width="1" opacity="0.6" />
-    
-    <!-- Direction Indicator (Triangle at front) -->
     <path d="M45 35 L55 35 L50 25 Z" fill="${color}" />
   </g>
 </svg>
 `;
 
-export const MapPicker: React.FC<MapPickerProps> = ({ lat, lng, onLocationSelect, isMaximized, devices = [] }) => {
+const isDockDevice = (device: Device) => {
+  if (device.domain === 3) return true;
+  return device.device_model.toLowerCase().includes('dock');
+};
+
+export const MapPicker: React.FC<MapPickerProps> = ({
+  lat,
+  lng,
+  onLocationSelect,
+  isMaximized,
+  devices = [],
+  selectedDeviceSn,
+  onMapInteract
+}) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const targetMarkerRef = useRef<L.Marker | null>(null);
-  const deviceLayerRef = useRef<L.LayerGroup | null>(null);
-  
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const targetMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const deviceMarkersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
+
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [mapStyle, setMapStyle] = useState(MAPBOX_STYLE);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,185 +92,239 @@ export const MapPicker: React.FC<MapPickerProps> = ({ lat, lng, onLocationSelect
     }
   };
 
-  // Initialize Map
   useEffect(() => {
-    if (!mapContainerRef.current) return;
+    let isActive = true;
 
-    // Initialize map
-    const map = L.map(mapContainerRef.current, {
-      center: [lat, lng],
-      zoom: 13,
-      zoomControl: false 
-    });
-    
-    mapInstanceRef.current = map;
-    deviceLayerRef.current = L.layerGroup().addTo(map);
+    const initMap = async () => {
+      if (!mapContainerRef.current) return;
 
-    // Mapbox Tile Layer (Streets/Light)
-    L.tileLayer(`https://api.mapbox.com/styles/v1/${MAPBOX_STYLE}/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`, {
-      attribution: '© <a href="https://www.mapbox.com/about/maps/">Mapbox</a> © <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      tileSize: 512,
-      zoomOffset: -1,
-      maxZoom: 20
-    }).addTo(map);
-
-    // Custom Target Marker Icon (Red)
-    const targetIcon = L.icon({
-       iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
-       shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-       iconSize: [25, 41],
-       iconAnchor: [12, 41],
-       popupAnchor: [1, -34],
-       shadowSize: [41, 41]
-    });
-
-    // Create target marker
-    const marker = L.marker([lat, lng], { icon: targetIcon, draggable: true }).addTo(map);
-    marker.bindPopup("<b>Target Location</b><br>Incident Origin").openPopup();
-    
-    marker.on('dragend', (e) => {
-      const marker = e.target;
-      const position = marker.getLatLng();
-      onLocationSelect(position.lat, position.lng);
-    });
-
-    targetMarkerRef.current = marker;
-
-    // Handle Right Click (Context Menu)
-    map.on('contextmenu', (e: L.LeafletMouseEvent) => {
-       const { lat, lng } = e.latlng;
-       const safeLat = Number(lat.toFixed(6));
-       const safeLng = Number(lng.toFixed(6));
-       onLocationSelect(safeLat, safeLng);
-    });
-
-    // Cleanup
-    return () => {
-      map.remove();
-      mapInstanceRef.current = null;
-    };
-  }, []); 
-
-  // Update Target Marker position
-  useEffect(() => {
-    if (mapInstanceRef.current && targetMarkerRef.current) {
-        const currentLatLng = targetMarkerRef.current.getLatLng();
-        if (currentLatLng.lat !== lat || currentLatLng.lng !== lng) {
-            targetMarkerRef.current.setLatLng([lat, lng]);
-            // Only fly to if distance is significant to avoid annoying pans
-            if (mapInstanceRef.current.distance([lat, lng], currentLatLng) > 500) {
-                mapInstanceRef.current.flyTo([lat, lng], mapInstanceRef.current.getZoom());
-            }
+      let token = MAPBOX_TOKEN;
+      try {
+        const res = await fetch('/api/config');
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg?.mapbox_public_token) {
+            token = cfg.mapbox_public_token;
+          }
         }
-    }
-  }, [lat, lng]);
+      } catch {
+        // Use embedded token
+      }
 
-  // Handle Resize for Maximize
+      if (!isActive || !mapContainerRef.current) return;
+
+      mapboxgl.accessToken = token;
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: mapStyle,
+        center: [lng, lat],
+        zoom: 13
+      });
+
+      mapRef.current = map;
+      map.addControl(new mapboxgl.NavigationControl(), 'bottom-right');
+
+      map.on('click', () => {
+        onMapInteract?.();
+      });
+
+      map.on('contextmenu', (e) => {
+        onMapInteract?.();
+        const safeLat = Number(e.lngLat.lat.toFixed(6));
+        const safeLng = Number(e.lngLat.lng.toFixed(6));
+        onLocationSelect(safeLat, safeLng);
+      });
+
+      const marker = new mapboxgl.Marker({ color: '#ef4444', draggable: true })
+        .setLngLat([lng, lat])
+        .setPopup(new mapboxgl.Popup({ offset: 24 }).setHTML("<b>Target Location</b><br>Incident Origin"))
+        .addTo(map);
+
+      marker.on('dragend', () => {
+        const pos = marker.getLngLat();
+        onLocationSelect(pos.lat, pos.lng);
+      });
+
+      targetMarkerRef.current = marker;
+    };
+
+    initMap();
+
+    return () => {
+      isActive = false;
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
-    if (mapInstanceRef.current) {
+    if (!mapRef.current) return;
+    mapRef.current.setStyle(mapStyle);
+  }, [mapStyle]);
+
+  useEffect(() => {
+    if (mapRef.current) {
       setTimeout(() => {
-        mapInstanceRef.current?.invalidateSize();
+        mapRef.current?.resize();
       }, 300);
     }
   }, [isMaximized]);
 
-  // Render Devices
   useEffect(() => {
-    if (!mapInstanceRef.current || !deviceLayerRef.current) return;
+    const map = mapRef.current;
+    if (!map || !targetMarkerRef.current) return;
 
-    // Clear existing devices
-    deviceLayerRef.current.clearLayers();
+    const current = targetMarkerRef.current.getLngLat();
+    if (current.lat !== lat || current.lng !== lng) {
+      targetMarkerRef.current.setLngLat([lng, lat]);
+      const delta = Math.abs(current.lat - lat) + Math.abs(current.lng - lng);
+      if (delta > 0.005) {
+        map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 13) });
+      }
+    }
+  }, [lat, lng]);
 
-    const createDroneIcon = (heading: number, isOnline: boolean) => {
-        // Green for Online (#4ade80), Red for Offline (#ef4444)
-        const color = isOnline ? '#4ade80' : '#ef4444'; 
-        const svgString = getDroneSvg(color);
-        const encodedSvg = encodeURIComponent(svgString);
-        
-        return L.divIcon({
-            className: 'custom-drone-icon',
-            html: `
-              <div style="
-                transform: rotate(${heading}deg); 
-                width: 48px; 
-                height: 48px; 
-                background-image: url('data:image/svg+xml;charset=utf-8,${encodedSvg}');
-                background-repeat: no-repeat;
-                background-position: center;
-                background-size: contain;
-                filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
-                opacity: ${isOnline ? 1 : 0.7};
-              "></div>
-            `,
-            iconSize: [48, 48],
-            iconAnchor: [24, 24],
-        });
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    deviceMarkersRef.current.forEach((marker) => marker.remove());
+    deviceMarkersRef.current.clear();
+
+    const createDroneMarkerEl = (heading: number, isOnline: boolean, isSelected: boolean) => {
+      const baseColor = isOnline ? '#4ade80' : '#ef4444';
+      const color = isSelected && isOnline ? '#22c55e' : baseColor;
+      const svgString = getDroneSvg(color);
+      const encodedSvg = encodeURIComponent(svgString);
+
+      const el = document.createElement('div');
+      el.innerHTML = `
+        <div style="
+          transform: rotate(${heading}deg); 
+          width: 48px; 
+          height: 48px; 
+          background-image: url('data:image/svg+xml;charset=utf-8,${encodedSvg}');
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: contain;
+          filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)) ${isSelected && isOnline ? 'drop-shadow(0 0 8px rgba(34,197,94,0.8))' : ''};
+          opacity: ${isOnline ? 1 : 0.7};
+        "></div>
+      `;
+      el.style.pointerEvents = 'auto';
+      return el;
     };
 
-    devices.forEach(device => {
-        // Render if telemetry exists (which now includes offline position)
-        if (device.telemetry && (device.telemetry.latitude !== 0 || device.telemetry.longitude !== 0)) {
-            const lat = device.telemetry.latitude ?? 0;
-            const lon = device.telemetry.longitude ?? 0;
-            const speed = device.telemetry.speed ?? 0;
-            const height = device.telemetry.height ?? 0;
-            const batt = device.telemetry.battery_percent ?? 0;
-            const yaw = device.telemetry.yaw ?? 0;
-            const flightTime = device.telemetry.flight_time ?? 0;
+    const createDockMarkerEl = (isOnline: boolean) => {
+      const el = document.createElement('div');
+      const fill = isOnline ? '#22c55e' : '#64748b';
+      const border = isOnline ? '#86efac' : '#94a3b8';
+      el.innerHTML = `
+        <div style="
+          width: 18px;
+          height: 18px;
+          border-radius: 3px;
+          background: ${fill};
+          border: 2px solid ${border};
+          box-shadow: 0 0 8px rgba(0,0,0,0.35);
+          opacity: ${isOnline ? 1 : 0.7};
+        "></div>
+      `;
+      el.style.pointerEvents = 'auto';
+      return el;
+    };
 
-            const marker = L.marker([lat, lon], { 
-                icon: createDroneIcon(yaw, device.status),
-                zIndexOffset: device.status ? 1000 : 500 // Online on top
-            });
+    devices.forEach((device) => {
+      if (!device.telemetry) return;
+      const lat = device.telemetry.latitude ?? 0;
+      const lon = device.telemetry.longitude ?? 0;
+      if (lat === 0 && lon === 0) return;
 
-            // Format Flight Time
-            const m = Math.floor(flightTime / 60);
-            const s = flightTime % 60;
-            
-            const statusBadge = device.status 
-                ? '<span class="text-green-500 font-bold text-[10px] uppercase">ONLINE</span>' 
-                : '<span class="text-red-500 font-bold text-[10px] uppercase">OFFLINE</span>';
+      const speed = device.telemetry.speed ?? 0;
+      const height = device.telemetry.height ?? 0;
+      const batt = device.telemetry.battery_percent ?? 0;
+      const yaw = device.telemetry.yaw ?? 0;
+      const flightTime = device.telemetry.flight_time ?? 0;
 
-            const popupContent = `
-                <div class="font-sans min-w-[180px]">
-                    <div class="flex justify-between items-center border-b pb-1 mb-2">
-                         <div class="flex flex-col">
-                           <h3 class="font-bold text-slate-800 text-sm">${device.nickname}</h3>
-                           <span class="text-[9px] text-slate-500 font-mono">${device.device_model}</span>
-                         </div>
-                    </div>
-                    ${statusBadge}
-                    <div class="grid grid-cols-2 gap-y-1 text-xs text-slate-600 mt-2">
-                        <span class="font-semibold">Speed:</span>
-                        <span>${speed.toFixed(1)} m/s</span>
-                        
-                        <span class="font-semibold">Height:</span>
-                        <span>${height.toFixed(1)} m</span>
-                        
-                        <span class="font-semibold">Battery:</span>
-                        <span class="${batt < 20 ? 'text-red-600 font-bold' : ''}">${batt}%</span>
-                        
-                        ${device.status ? `
-                        <span class="font-semibold">Flight Time:</span>
-                        <span>${m}m ${s}s</span>
-                        ` : ''}
-                    </div>
-                    <div class="mt-2 pt-2 border-t text-[9px] text-slate-400 font-mono">SN: ${device.device_sn}</div>
-                </div>
-            `;
+      const m = Math.floor(flightTime / 60);
+      const s = flightTime % 60;
+      const statusBadge = device.status
+        ? '<span class="text-green-500 font-bold text-[10px] uppercase">ONLINE</span>'
+        : '<span class="text-red-500 font-bold text-[10px] uppercase">OFFLINE</span>';
 
-            marker.bindPopup(popupContent);
-            deviceLayerRef.current?.addLayer(marker);
-        }
+      const isDock = isDockDevice(device);
+      const isSelected = Boolean(selectedDeviceSn && device.device_sn === selectedDeviceSn);
+      const el = isDock
+        ? createDockMarkerEl(device.status)
+        : createDroneMarkerEl(yaw, device.status, isSelected);
+
+      el.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+
+      const popupContent = isDock ? `
+        <div class="font-sans min-w-[160px]">
+          <div class="flex justify-between items-center border-b pb-1 mb-2">
+            <div class="flex flex-col">
+              <h3 class="font-bold text-slate-800 text-sm">${device.nickname}</h3>
+              <span class="text-[9px] text-slate-500 font-mono">Dock</span>
+            </div>
+          </div>
+          ${statusBadge}
+          <div class="grid grid-cols-2 gap-y-1 text-xs text-slate-600 mt-2">
+            <span class="font-semibold">Height:</span>
+            <span>${height.toFixed(1)} m</span>
+          </div>
+          <div class="mt-2 pt-2 border-t text-[9px] text-slate-400 font-mono">SN: ${device.device_sn}</div>
+        </div>
+      ` : `
+        <div class="font-sans min-w-[180px]">
+          <div class="flex justify-between items-center border-b pb-1 mb-2">
+            <div class="flex flex-col">
+              <h3 class="font-bold text-slate-800 text-sm">${device.nickname}</h3>
+              <span class="text-[9px] text-slate-500 font-mono">${device.device_model}</span>
+            </div>
+          </div>
+          ${statusBadge}
+          <div class="grid grid-cols-2 gap-y-1 text-xs text-slate-600 mt-2">
+            <span class="font-semibold">Speed:</span>
+            <span>${speed.toFixed(1)} m/s</span>
+            <span class="font-semibold">Height:</span>
+            <span>${height.toFixed(1)} m</span>
+            <span class="font-semibold">Battery:</span>
+            <span class="${batt < 20 ? 'text-red-600 font-bold' : ''}">${batt}%</span>
+            ${device.status ? `
+            <span class="font-semibold">Flight Time:</span>
+            <span>${m}m ${s}s</span>
+            ` : ''}
+          </div>
+          <div class="mt-2 pt-2 border-t text-[9px] text-slate-400 font-mono">SN: ${device.device_sn}</div>
+        </div>
+      `;
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([lon, lat])
+        .setPopup(new mapboxgl.Popup({ offset: 18 }).setHTML(popupContent))
+        .addTo(map);
+
+      deviceMarkersRef.current.set(device.device_sn, marker);
     });
+  }, [devices, selectedDeviceSn]);
 
-  }, [devices]);
+  useEffect(() => {
+    if (!mapRef.current || !selectedDeviceSn) return;
+    const target = devices.find((device) => device.device_sn === selectedDeviceSn);
+    if (!target?.telemetry) return;
+    const lat = target.telemetry.latitude ?? 0;
+    const lon = target.telemetry.longitude ?? 0;
+    if (lat === 0 && lon === 0) return;
+    mapRef.current.flyTo({ center: [lon, lat], zoom: Math.max(mapRef.current.getZoom(), 15) });
+  }, [devices, selectedDeviceSn]);
 
   return (
-    <div className="relative h-full w-full bg-slate-900 group">
+    <div className="relative h-full w-full group">
       <div ref={mapContainerRef} className="h-full w-full z-0" />
       
-      {/* Search Bar Overlay */}
       <form onSubmit={handleSearch} className="absolute top-4 left-4 z-[400] w-64 shadow-xl">
         <div className="relative flex items-center">
            <input 
@@ -272,12 +332,12 @@ export const MapPicker: React.FC<MapPickerProps> = ({ lat, lng, onLocationSelect
               placeholder="Search target location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-900/90 backdrop-blur text-slate-200 placeholder:text-slate-500 text-xs px-3 py-2 pr-8 rounded border border-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500 shadow-sm"
+              className="w-full panel-strong text-[color:var(--text)] placeholder:text-[color:var(--muted)] text-xs px-3 py-2 pr-8 rounded focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)] shadow-sm"
            />
            <button 
               type="submit" 
               disabled={isSearching}
-              className="absolute right-2 text-slate-400 hover:text-cyan-400 transition-colors disabled:opacity-50"
+              className="absolute right-2 muted-text hover:text-[color:var(--accent)] transition-colors disabled:opacity-50"
            >
               {isSearching ? (
                  <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -292,6 +352,27 @@ export const MapPicker: React.FC<MapPickerProps> = ({ lat, lng, onLocationSelect
            </button>
         </div>
       </form>
+
+      <div className="absolute bottom-4 left-4 z-[400] flex gap-2">
+        <button
+          type="button"
+          onClick={() => setMapStyle(MAPBOX_STYLE)}
+          className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border transition-colors ${
+            mapStyle === MAPBOX_STYLE ? 'accent-chip' : 'panel-strong text-[color:var(--text)]'
+          }`}
+        >
+          Streets
+        </button>
+        <button
+          type="button"
+          onClick={() => setMapStyle(MAPBOX_STYLE_SAT)}
+          className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border transition-colors ${
+            mapStyle === MAPBOX_STYLE_SAT ? 'accent-chip' : 'panel-strong text-[color:var(--text)]'
+          }`}
+        >
+          Satellite
+        </button>
+      </div>
     </div>
   );
 };

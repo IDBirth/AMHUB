@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { sendWorkflowAlert, getProjectTopology } from './services/apiService';
+import { sendWorkflowAlert, getProjectTopology, getLiveSnapshot, connectLiveTelemetry } from './services/apiService';
 import { WorkflowRequest, LogEntry, ConnectionStatus, AppSettings, Device } from './types';
 import { 
   WORKFLOW_UUID, CREATOR_ID, DEFAULT_LAT, DEFAULT_LNG, 
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.IDLE);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [followDeviceSn, setFollowDeviceSn] = useState<string | null>(null);
   
   // Device/Topology State
   const [devices, setDevices] = useState<Device[]>([]);
@@ -47,7 +48,7 @@ const App: React.FC = () => {
     setLogs(prev => [...prev, newLog]);
   }, []);
 
-  // Fetch Topology
+  // Fetch Topology (fallback)
   const fetchDevices = useCallback(async () => {
     setIsLoadingDevices(true);
     try {
@@ -74,14 +75,65 @@ const App: React.FC = () => {
     }
   }, [appSettings, addLog]);
 
-  // Initial Fetch
+  const mergeDevices = useCallback((incoming: Device[]) => {
+    setDevices(prev => {
+      if (prev.length === 0) return incoming;
+      const map = new Map(prev.map(d => [d.device_sn, d]));
+      incoming.forEach(d => map.set(d.device_sn, d));
+      return Array.from(map.values());
+    });
+  }, []);
+
+  // Live Telemetry (WebSocket)
   useEffect(() => {
-    fetchDevices();
-  }, [fetchDevices]);
+    addLog('info', 'Connecting live telemetry (WebSocket)...');
+    const connection = connectLiveTelemetry({
+      onDevices: (nextDevices, type) => {
+        if (type === 'snapshot') {
+          setDevices(nextDevices);
+          addLog('info', `Live Snapshot: ${nextDevices.length} devices.`);
+        } else {
+          mergeDevices(nextDevices);
+        }
+      },
+      onStatus: (status, detail) => {
+        addLog('info', `Live WS ${status}${detail ? `: ${detail}` : ''}`);
+      },
+      onError: (error) => {
+        addLog('error', 'Live WS error', { error: String(error) });
+      }
+    });
+
+    return () => {
+      connection.close();
+    };
+  }, [addLog, mergeDevices]);
+
+  // Initial Snapshot for quick load
+  useEffect(() => {
+    setIsLoadingDevices(true);
+    getLiveSnapshot()
+      .then((liveDevices) => {
+        if (liveDevices.length > 0) {
+          setDevices(liveDevices);
+          addLog('info', `Live Snapshot: ${liveDevices.length} devices.`);
+        } else {
+          fetchDevices();
+        }
+      })
+      .catch(() => {
+        fetchDevices();
+      })
+      .finally(() => setIsLoadingDevices(false));
+  }, [addLog, fetchDevices]);
 
   const handleLocationSelect = (lat: number, lng: number) => {
     setLatitude(lat);
     setLongitude(lng);
+  };
+
+  const handleMapInteract = () => {
+    setFollowDeviceSn(null);
   };
 
   const handleTrigger = async () => {
@@ -127,7 +179,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-200 flex flex-col font-sans overflow-hidden">
+    <div className="h-screen w-screen app-shell flex flex-col overflow-hidden">
       
       <SettingsModal 
         isOpen={isSettingsOpen} 
@@ -137,7 +189,7 @@ const App: React.FC = () => {
       />
 
       {/* Compact Header */}
-      <header className="bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-2 flex justify-between items-center z-20 shrink-0">
+      <header className="panel-strong px-4 py-2 flex justify-between items-center z-20 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-6 h-6 rounded bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center shadow-lg shadow-red-900/50">
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -152,7 +204,7 @@ const App: React.FC = () => {
           <StatusBadge status={status} />
           <button 
             onClick={() => setIsSettingsOpen(true)}
-            className="p-1.5 rounded-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-full panel hover:border-[rgba(143,179,106,0.6)] text-[color:var(--muted)] hover:text-white transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -163,7 +215,7 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content: Map + Overlays */}
-      <main className="flex-1 relative overflow-hidden bg-slate-900">
+      <main className="flex-1 relative overflow-hidden">
         
         {/* Full Screen Map */}
         <div className="absolute inset-0 z-0">
@@ -173,6 +225,8 @@ const App: React.FC = () => {
             onLocationSelect={handleLocationSelect} 
             isMaximized={true} // Always max style
             devices={devices}
+            selectedDeviceSn={followDeviceSn}
+            onMapInteract={handleMapInteract}
           />
         </div>
 
@@ -182,58 +236,59 @@ const App: React.FC = () => {
              devices={devices} 
              isLoading={isLoadingDevices} 
              onRefresh={fetchDevices} 
+             onSelect={(device) => setFollowDeviceSn(device.device_sn)}
              className="pointer-events-auto h-full"
           />
         </div>
 
         {/* RIGHT OVERLAY: Control Panel */}
         <div className="absolute top-4 right-4 z-10 w-80 pointer-events-auto">
-          <div className="bg-slate-950/90 backdrop-blur-md border border-slate-800 rounded-lg shadow-2xl p-4 flex flex-col gap-4">
-             <div className="border-b border-slate-800 pb-2">
-                <h2 className="text-xs font-bold text-white uppercase tracking-wider">Mission Config</h2>
+          <div className="panel-strong rounded-lg shadow-2xl p-4 flex flex-col gap-4">
+             <div className="border-b border-[color:var(--card-border)] pb-2">
+                <h2 className="text-xs font-bold uppercase tracking-wider">Mission Config</h2>
              </div>
              
              {/* Coords */}
              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[9px] uppercase text-slate-500 font-bold">Lat</label>
+                  <label className="text-[9px] uppercase muted-text font-bold">Lat</label>
                   <input 
                     type="number" 
                     step="0.000001"
                     value={latitude}
                     onChange={(e) => setLatitude(parseFloat(e.target.value))}
-                    className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+                    className="w-full bg-transparent border border-[color:var(--card-border)] rounded px-2 py-1 text-xs font-mono text-[color:var(--accent)] focus:outline-none focus:border-[color:var(--accent)]"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[9px] uppercase text-slate-500 font-bold">Lng</label>
+                  <label className="text-[9px] uppercase muted-text font-bold">Lng</label>
                   <input 
                     type="number" 
                     step="0.000001"
                     value={longitude}
                     onChange={(e) => setLongitude(parseFloat(e.target.value))}
-                    className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+                    className="w-full bg-transparent border border-[color:var(--card-border)] rounded px-2 py-1 text-xs font-mono text-[color:var(--accent)] focus:outline-none focus:border-[color:var(--accent)]"
                   />
                 </div>
              </div>
 
              <div className="space-y-1">
-                <label className="text-[9px] uppercase text-slate-500 font-bold">Requester</label>
+                <label className="text-[9px] uppercase muted-text font-bold">Requester</label>
                 <input 
                   type="text" 
                   value={requesterName}
                   onChange={(e) => setRequesterName(e.target.value)}
                   placeholder="ID / Name"
-                  className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-cyan-400 focus:outline-none focus:border-cyan-500"
+                  className="w-full bg-transparent border border-[color:var(--card-border)] rounded px-2 py-1 text-xs font-mono text-[color:var(--accent)] focus:outline-none focus:border-[color:var(--accent)]"
                 />
              </div>
 
              <div className="space-y-1">
-              <label className="text-[9px] uppercase text-slate-500 font-bold">Description</label>
+              <label className="text-[9px] uppercase muted-text font-bold">Description</label>
               <textarea 
                 value={desc}
                 onChange={(e) => setDesc(e.target.value)}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-red-500 resize-none h-14"
+                className="w-full bg-transparent border border-[color:var(--card-border)] rounded px-2 py-1 text-xs text-[color:var(--text)] focus:outline-none focus:border-[color:var(--accent-2)] resize-none h-14"
               />
             </div>
 
@@ -246,7 +301,7 @@ const App: React.FC = () => {
                       py-1 rounded font-mono text-xs font-bold border transition-all
                       ${level === lvl 
                         ? 'bg-red-600 border-red-500 text-white' 
-                        : 'bg-slate-900/50 border-slate-800 text-slate-500 hover:text-slate-300'
+                        : 'bg-transparent border-[color:var(--card-border)] muted-text hover:text-[color:var(--text)]'
                       }
                     `}
                    >
@@ -263,7 +318,7 @@ const App: React.FC = () => {
                 mt-2 relative overflow-hidden group w-full p-3 rounded-lg border transition-all duration-300
                 flex items-center justify-center gap-2 shadow-lg
                 ${status === ConnectionStatus.SENDING 
-                  ? 'bg-slate-800 border-slate-700 cursor-not-allowed opacity-80' 
+                  ? 'bg-[rgba(12,20,12,0.9)] border-[color:var(--card-border)] cursor-not-allowed opacity-80' 
                   : 'bg-gradient-to-r from-red-600 to-red-800 border-red-500 hover:border-red-400 hover:shadow-red-900/50'
                 }
               `}
@@ -283,7 +338,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Bottom: Logs */}
-      <div className="h-48 border-t border-slate-800 bg-slate-950 shrink-0 z-20">
+      <div className="h-48 border-t border-[color:var(--card-border)] shrink-0 z-20">
         <ConsoleLog logs={logs} />
       </div>
 
