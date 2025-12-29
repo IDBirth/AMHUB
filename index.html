@@ -5,43 +5,81 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FlightHub Controller</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.17.0/mapbox-gl.css" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet" />
     <style>
+      :root {
+        --bg-1: #121a12;
+        --bg-2: #0b120c;
+        --card: rgba(12, 20, 12, 0.78);
+        --card-strong: rgba(12, 20, 12, 0.95);
+        --card-border: rgba(122, 143, 116, 0.35);
+        --text: #e6ede4;
+        --muted: #a3b1a0;
+        --accent: #8fb36a;
+        --accent-2: #d4b56a;
+      }
+
+      body.app-body {
+        margin: 0;
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--text);
+        background: radial-gradient(900px 700px at 15% 10%, #1c251a 0%, transparent 55%),
+                    radial-gradient(1000px 800px at 90% 10%, #3f5a36 0%, transparent 45%),
+                    linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      }
+
+      .app-shell {
+        color: var(--text);
+      }
+
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        backdrop-filter: blur(12px);
+      }
+
+      .panel-strong {
+        background: var(--card-strong);
+        border: 1px solid var(--card-border);
+        backdrop-filter: blur(12px);
+      }
+
+      .muted-text {
+        color: var(--muted);
+      }
+
+      .accent-chip {
+        border-color: rgba(143, 179, 106, 0.6);
+        color: #0c140c;
+        background: linear-gradient(120deg, var(--accent), var(--accent-2));
+      }
+
       /* Custom scrollbar for log window */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
       }
       ::-webkit-scrollbar-track {
-        background: #1e293b; 
+        background: rgba(12, 20, 12, 0.7);
       }
       ::-webkit-scrollbar-thumb {
-        background: #475569; 
+        background: rgba(143, 179, 106, 0.35);
         border-radius: 4px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #64748b; 
+        background: rgba(143, 179, 106, 0.6);
       }
       /* Map container override */
-      .leaflet-container {
-        background: #0f172a;
-        width: 100%;
-        height: 100%;
-        z-index: 0;
+      .mapboxgl-canvas {
+        background: #0b120c;
       }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "leaflet": "https://esm.sh/leaflet@1.9.4"
-  }
-}
-</script>
+    <script type="module" src="/index.tsx"></script>
 </head>
-  <body class="bg-slate-950 text-slate-200 antialiased">
+  <body class="app-body antialiased">
     <div id="root"></div>
   </body>
 </html>
