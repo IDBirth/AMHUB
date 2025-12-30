@@ -13,10 +13,8 @@ View your app in AI Studio: https://ai.studio/apps/drive/1kuKHXFmROMIG9W_Bl4NjEJ
 **Prerequisites:**  Node.js
 
 
-1. From the project root, enter the app folder:
-   `cd AMHUB`
-2. Install dependencies:
+1. Install dependencies:
    `npm install`
-3. (Optional) If you wire Gemini later, set `GEMINI_API_KEY` in `.env.local`
-4. Run the app:
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
    `npm run dev`
