@@ -28,3 +28,4 @@ Notes:
 - `backend/Secret/secrets.json` holds local defaults for the FastAPI app.
 - `frontend/.env.local` holds Next.js server-side env vars.
 - `frontend/index.html`, `frontend/index.tsx`, and `frontend/vite.config.ts` are legacy Vite files and can be removed if you want a lean Next.js-only frontend.
+- FastAPI provides `GET /api/topology`, `GET /api/state`, and `WS /ws/telemetry` for the frontend.

@@ -88,6 +88,7 @@ app.add_middleware(
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIST = BASE_DIR / "dist"
 
+# Backend-only server; frontend is served by Next.js.
 if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
@@ -241,6 +242,11 @@ async def api_state() -> JSONResponse:
 async def api_config() -> Dict[str, Any]:
     return {"mapbox_public_token": MAPBOX_PUBLIC_TOKEN}
 
+@app.get("/api/topology")
+async def api_topology() -> JSONResponse:
+    async with state_lock:
+        return JSONResponse({"type": "snapshot", "devices": list(latest_by_sn.values())})
+
 @app.get("/api/stream")
 async def api_stream(sn: str = Query(...)) -> Dict[str, Optional[str]]:
     return {"sn": sn, "url": STREAM_URL_BY_SN.get(sn)}
@@ -282,16 +288,5 @@ if __name__ == "__main__":
 # Frontend (built app)
 # -------------------------
 @app.get("/")
-async def frontend_root() -> FileResponse:
-    index_path = FRONTEND_DIST / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return FileResponse(Path(__file__).resolve().parent / "index.html")
-
-
-@app.get("/{path:path}")
-async def frontend_fallback(path: str) -> FileResponse:
-    index_path = FRONTEND_DIST / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    return FileResponse(Path(__file__).resolve().parent / "index.html")
+async def frontend_root() -> JSONResponse:
+    return JSONResponse({"ok": True, "service": "flighthub-telemetry-backend"})

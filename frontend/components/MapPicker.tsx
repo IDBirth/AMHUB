@@ -13,6 +13,7 @@ interface MapPickerProps {
 }
 
 const MAPBOX_TOKEN = "pk.eyJ1IjoiYmlsYWxhbXQiLCJhIjoiY21qcHdmNjd1M2ljMTNncXh4OG10bjM1ZSJ9.DdrBIWn_ukTldrDk0_7oWg";
+const ENV_MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN || "";
 const MAPBOX_STYLE = "mapbox://styles/mapbox/streets-v12";
 const MAPBOX_STYLE_SAT = "mapbox://styles/mapbox/satellite-streets-v12";
 
@@ -98,18 +99,7 @@ export const MapPicker: React.FC<MapPickerProps> = ({
     const initMap = async () => {
       if (!mapContainerRef.current) return;
 
-      let token = MAPBOX_TOKEN;
-      try {
-        const res = await fetch('/api/config');
-        if (res.ok) {
-          const cfg = await res.json();
-          if (cfg?.mapbox_public_token) {
-            token = cfg.mapbox_public_token;
-          }
-        }
-      } catch {
-        // Use embedded token
-      }
+      const token = ENV_MAPBOX_TOKEN || MAPBOX_TOKEN;
 
       if (!isActive || !mapContainerRef.current) return;
 

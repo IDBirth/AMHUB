@@ -4,7 +4,7 @@
 
 # Run and deploy your FlightHub console
 
-This is now a Next.js (App Router) app designed for Vercel deployments with server-side route handlers.
+This is a Next.js (App Router) app that uses the FastAPI backend for telemetry and topology data.
 
 ## Run Locally
 
@@ -12,11 +12,11 @@ This is now a Next.js (App Router) app designed for Vercel deployments with serv
 
 1. Install dependencies:
    `npm install`
-2. (Recommended) Create `.env.local` with the server-side credentials:
-   - `DJI_WORKFLOW_URL`
-   - `DJI_USER_TOKEN` or `DJI_ORG_KEY`
-   - `DJI_PROJECT_UUID` (optional default)
-   - `DJI_BASE_URL` (optional, defaults to `https://es-flight-api-us.djigate.com`)
+2. (Recommended) Create `.env.local` with the following:
+   - `DJI_WORKFLOW_URL` (for workflow triggers)
+   - `DJI_USER_TOKEN` (for workflow triggers)
    - `NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN` (optional)
+   - `NEXT_PUBLIC_LIVE_HTTP_BASE` (e.g. `http://localhost:8000`)
+   - `NEXT_PUBLIC_LIVE_WS_URL` (e.g. `ws://localhost:8000/ws/telemetry`)
 3. Run the app:
    `npm run dev`

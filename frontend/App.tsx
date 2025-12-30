@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { sendWorkflowAlert, getProjectTopology } from './services/apiService';
+import { sendWorkflowAlert, getProjectTopology, getLiveSnapshot, connectLiveTelemetry } from './services/apiService';
 import { WorkflowRequest, LogEntry, ConnectionStatus, AppSettings, Device } from './types';
 import { 
   WORKFLOW_UUID, CREATOR_ID, DEFAULT_LAT, DEFAULT_LNG, 
@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [followDeviceSn, setFollowDeviceSn] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('closed');
   
   // Device/Topology State
   const [devices, setDevices] = useState<Device[]>([]);
@@ -38,34 +39,7 @@ const App: React.FC = () => {
   const [level, setLevel] = useState(DEFAULT_LEVEL);
   const [requesterName, setRequesterName] = useState("");
 
-  useEffect(() => {
-    let isActive = true;
-
-    const loadConfig = async () => {
-      try {
-        const res = await fetch('/api/config');
-        if (!res.ok) return;
-        const cfg = await res.json();
-        const next = cfg?.app_settings;
-        if (!isActive || !next) return;
-
-        setAppSettings((prev) => ({
-          projectUuid: next.projectUuid || prev.projectUuid,
-          workflowUuid: next.workflowUuid || prev.workflowUuid,
-          creatorId: next.creatorId || prev.creatorId,
-          userToken: prev.userToken
-        }));
-      } catch {
-        // Config is optional; defaults or user settings apply.
-      }
-    };
-
-    loadConfig();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
+  // App settings now come from defaults or the settings modal.
 
   const addLog = useCallback((type: LogEntry['type'], message: string, details?: unknown) => {
     const newLog: LogEntry = {
@@ -127,6 +101,48 @@ const App: React.FC = () => {
       if (intervalId) window.clearInterval(intervalId);
     };
   }, [fetchDevices]);
+
+  // Live telemetry via backend (snapshot + websocket updates)
+  useEffect(() => {
+    let isActive = true;
+
+    const loadSnapshot = async () => {
+      try {
+        const snapshot = await getLiveSnapshot();
+        if (!isActive) return;
+        setDevices(snapshot);
+        addLog('info', `Live snapshot loaded (${snapshot.length} devices).`);
+      } catch (error) {
+        addLog('error', 'Live snapshot failed', { error: String(error) });
+      }
+    };
+
+    const conn = connectLiveTelemetry({
+      onDevices: (nextDevices, type) => {
+        if (!isActive) return;
+        setDevices(nextDevices);
+        if (type === 'snapshot') {
+          addLog('info', `Live snapshot received (${nextDevices.length} devices).`);
+        }
+      },
+      onStatus: (status, detail) => {
+        if (!isActive) return;
+        setLiveStatus(status);
+        addLog('info', `Live status: ${status}${detail ? ` (${detail})` : ''}`);
+      },
+      onError: (error) => {
+        if (!isActive) return;
+        addLog('error', 'Live telemetry error', { error: error.message });
+      }
+    });
+
+    loadSnapshot();
+
+    return () => {
+      isActive = false;
+      conn.close();
+    };
+  }, [addLog]);
 
   const handleLocationSelect = (lat: number, lng: number) => {
     setLatitude(lat);

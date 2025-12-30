@@ -218,24 +218,6 @@ export const getLiveSnapshot = async (): Promise<Device[]> => {
   return devices.map(mapLiveTelemetryDevice);
 };
 
-export const getDeviceOsd = async (deviceSn: string, settings: AppSettings): Promise<any> => {
-  const query = `deviceSn=${encodeURIComponent(deviceSn)}&projectUuid=${encodeURIComponent(settings.projectUuid)}`;
-  const response = await fetch(`/api/osd?${query}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(settings.userToken ? { 'x-user-token': settings.userToken } : {})
-    }
-  });
-
-  if (!response.ok) {
-    const errText = await response.text().catch(() => response.statusText);
-    throw new Error(`OSD API Error: ${response.status} - ${errText.substring(0, 100)}`);
-  }
-
-  return response.json();
-};
-
 export const connectLiveTelemetry = (handlers: {
   onDevices: (devices: Device[], type: 'snapshot' | 'telemetry_update') => void;
   onStatus?: (status: 'connecting' | 'open' | 'closed' | 'error', detail?: string) => void;
@@ -330,15 +312,14 @@ const isGenericId = (name: string): boolean => {
 
 export const getProjectTopology = async (settings: AppSettings): Promise<TopologyResponse> => {
   try {
-    const targetUrl = `/api/topology?projectUuid=${encodeURIComponent(settings.projectUuid)}`;
+    const targetUrl = `${buildLiveHttpBase()}/api/topology`;
 
     console.log("Fetching Topology:", targetUrl);
 
     const response = await fetch(targetUrl, {
       method: 'GET',
       headers: {
-        'Content-Type': 'application/json',
-        ...(settings.userToken ? { 'x-user-token': settings.userToken } : {})
+        'Content-Type': 'application/json'
       }
     });
 
@@ -353,86 +334,13 @@ export const getProjectTopology = async (settings: AppSettings): Promise<Topolog
         throw new Error("Invalid JSON response from API");
     }
 
-    const backendDevices = extractBackendDevices(rawData);
-    if (backendDevices) {
-        const mapped = backendDevices.map(mapBackendDevice);
-        return {
-            code: rawData?.code || 0,
-            message: rawData?.message || "Success",
-            data: mapped
-        };
-    }
-
-    const { dock, drone } = extractFlightHubTopologyDevices(rawData);
-    if (dock || drone) {
-        const dockState = dock?.device_state ?? {};
-        const liveCapable = Number(dockState?.live_capacity?.available_video_number ?? 0) > 0;
-        const liveActive = Array.isArray(dockState?.live_status) && dockState.live_status.length > 0;
-        const mapped: Device[] = [];
-
-        if (dock?.device_sn) {
-          const state = dock.device_state ?? {};
-          mapped.push({
-            device_sn: String(dock.device_sn),
-            nickname: String(dock.device_project_callsign || dock.device_sn),
-            device_model: String(dock.device_model?.name || 'DJI Dock'),
-            status: toBool(dock.device_online_status),
-            domain: 3,
-            telemetry: {
-              latitude: toNumber(state.latitude),
-              longitude: toNumber(state.longitude),
-              height: toNumber(state.height),
-              speed: 0,
-              h_speed_mps: 0,
-              v_speed_mps: 0,
-              battery_percent: toNumber(state?.drone_battery_maintenance_info?.batteries?.[0]?.capacity_percent ?? 0),
-              link_signal_quality: toNumber(state?.wireless_link?.sdr_quality ?? 0),
-              flight_time: 0,
-              yaw: 0,
-              pitch: 0,
-              roll: 0,
-              live_active: liveActive,
-              live_capable: liveCapable
-            },
-            raw: dock
-          });
-        }
-
-        if (drone?.device_sn) {
-          const state = drone.device_state ?? {};
-          const hSpeed = toNumber(state.horizontal_speed);
-          const vSpeed = toNumber(state.vertical_speed);
-          mapped.push({
-            device_sn: String(drone.device_sn),
-            nickname: String(drone.device_project_callsign || drone.device_sn),
-            device_model: String(drone.device_model?.name || 'DJI Drone'),
-            status: toBool(drone.device_online_status),
-            domain: 0,
-            telemetry: {
-              latitude: toNumber(state.latitude),
-              longitude: toNumber(state.longitude),
-              height: toNumber(state.height),
-              speed: hSpeed,
-              h_speed_mps: hSpeed,
-              v_speed_mps: vSpeed,
-              battery_percent: toNumber(state?.battery?.capacity_percent ?? 0),
-              link_signal_quality: toNumber(state?.wireless_link?.sdr_quality ?? 0),
-              flight_time: toNumber(state?.total_flight_time ?? 0),
-              yaw: toNumber(state.attitude_head),
-              pitch: toNumber(state.attitude_pitch),
-              roll: toNumber(state.attitude_roll),
-              live_active: liveActive,
-              live_capable: liveCapable
-            },
-            raw: drone
-          });
-        }
-
-        return {
-            code: rawData?.code || 0,
-            message: rawData?.message || "Success",
-            data: mapped
-        };
+    const liveDevices = Array.isArray(rawData?.devices) ? rawData.devices : [];
+    if (liveDevices.length > 0) {
+      return {
+        code: 0,
+        message: 'Success',
+        data: liveDevices.map(mapLiveTelemetryDevice)
+      };
     }
     
     // STEP 1: Flatten the tree into a list of potential device objects
